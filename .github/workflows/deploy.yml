@@ -5,24 +5,22 @@ on:
   push:
     branches:
       - main
-  # Дозволяє запускати вручну (для тестування)
   workflow_dispatch:
 
-# Дозволи для OIDC-аутентифікації з GCP
 permissions:
   contents: read
   id-token: write
 
 jobs:
   deploy-to-run:
-    runs-on: ubuntu-latest
+    # ФІКСУЄМО ВЕРСІЮ UBUNTU: використовуємо LTS-версію для стабільності
+    runs-on: ubuntu-22.04 
     
-    # Використовуємо змінні з попереднього контексту
     env:
       PROJECT_ID: massive-triumph-476718-d5
       SERVICE_NAME: static-site-https
       REGION: us-central1 
-      IMAGE_TAG: gcr.io/massive-triumph-476718-d5/static-site-https-v1_1 # Фін Тег
+      IMAGE_TAG: gcr.io/massive-triumph-476718-d5/static-site-https-v1_1
 
     steps:
       - name: Вивантажити код репозиторію
@@ -32,21 +30,16 @@ jobs:
       - name: Аутентифікація в GCP
         uses: google-github-actions/auth@v2
         with:
-          # Цей секрет має бути налаштований у налаштуваннях репозиторію на GitHub
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
       # 2. Збірка Docker-образу та його відправка в GCR/AR
-      - name: Запуск Cloud Build
-        uses: google-github-actions/build-cloud-storage@v3
-        with:
-          # Вказуємо, що контекст збірки - поточна директорія (де Dockerfile)
-          source: .
-          # Вказуємо PROJECT_ID та фінальний тег образу
-          image: ${{ env.IMAGE_TAG }}
-          project_id: ${{ env.PROJECT_ID }}
-          # Додаткові аргументи для gcloud builds submit
-          args: --tag ${{ env.IMAGE_TAG }}
+      - name: Запуск Cloud Build та відправка образу
+        # ВИКОРИСТОВУЄМО ПРЯМУ КОМАНДУ GCLOUD ДЛЯ ЗБІРКИ
+        run: |
+          gcloud builds submit . \
+            --tag ${{ env.IMAGE_TAG }} \
+            --project ${{ env.PROJECT_ID }}
 
       # 3. Розгортання образу в Cloud Run
       - name: Розгортання в Cloud Run
@@ -56,5 +49,4 @@ jobs:
           region: ${{ env.REGION }}
           image: ${{ env.IMAGE_TAG }}
           project_id: ${{ env.PROJECT_ID }}
-        
           flags: --platform managed --allow-unauthenticated --port 8080
