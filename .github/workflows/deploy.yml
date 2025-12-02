@@ -1,66 +1,60 @@
-name: Deploy to GCS
+name: Deploy to Cloud Run via Cloud Build
 
+# Визначаємо, коли запускати Workflow
 on:
   push:
-    branches:  
-    - main
-    # Дозволяє запускати вручну та передавати параметри
+    branches:
+      - main
+  # Дозволяє запускати вручну (для тестування)
   workflow_dispatch:
-    inputs:
-      clean_bucket:
-        description: 'Очистити GCS бакет перед завантаженням?'
-        required: false
-        type: boolean
-        default: false
 
 # Дозволи для OIDC-аутентифікації з GCP
 permissions:
-  contents: read  
+  contents: read
   id-token: write
 
 jobs:
-  deploy:
-    # Використовуємо стабільну версію Ubuntu для надійності
-    runs-on: ubuntu-22.04 
+  deploy-to-run:
+    runs-on: ubuntu-latest
     
+    # Використовуємо змінні з попереднього контексту
     env:
-      GCS_BUCKET: ${{ secrets.GCS_BUCKET_NAME }} # Використовуємо змінну оточення
+      PROJECT_ID: massive-triumph-476718-d5
+      SERVICE_NAME: static-site-https
+      REGION: us-central1 
+      IMAGE_TAG: gcr.io/massive-triumph-476718-d5/static-site-https-v1_1 # Фін Тег
 
     steps:
       - name: Вивантажити код репозиторію
         uses: actions/checkout@v4
 
-      # Аутентифікація в Google Cloud через Workload Identity Federation (WIF)
+      # 1. Аутентифікація в Google Cloud
       - name: Аутентифікація в GCP
         uses: google-github-actions/auth@v2
         with:
+          # Цей секрет має бути налаштований у налаштуваннях репозиторію на GitHub
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
-      # Перевірка: Переконаємося, що директорія 'site' існує
-      - name: Перевірка наявності директорії site
-        run: |
-          if [ ! -d "site" ]; then
-            echo "::error::Директорія 'site' не знайдена! Розгортання скасовано."
-            exit 1
-          fi
-
-      # Опціональна очистка: Запускається лише при ручному виклику з clean_bucket=true
-      - name: Очищення GCS бакету (умовне)
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.clean_bucket == 'true' }}
-        run: |
-          echo "Очищення бакету gs://${{ env.GCS_BUCKET }}..."
-          # || true для запобігання збою, якщо бакет порожній
-          gcloud storage rm -r gs://${{ env.GCS_BUCKET }}/** || true
-
-      # Розгортання: Завантаження файлів у GCS
-      - name: Завантаження сайту з Cache-Control
-        uses: google-github-actions/upload-cloud-storage@v3
+      # 2. Збірка Docker-образу та його відправка в GCR/AR
+      - name: Запуск Cloud Build
+        uses: google-github-actions/build-cloud-storage@v3
         with:
-          path: site
-          destination: ${{ env.GCS_BUCKET }}
-          gzip: true
-          # Встановлення заголовків кешування
-          cacheControl: 'public, max-age=300'
-          # 'parent: false' гарантує, що вміст 'site' потрапить у корінь бакету
-          parent: false
+          # Вказуємо, що контекст збірки - поточна директорія (де Dockerfile)
+          source: .
+          # Вказуємо PROJECT_ID та фінальний тег образу
+          image: ${{ env.IMAGE_TAG }}
+          project_id: ${{ env.PROJECT_ID }}
+          # Додаткові аргументи для gcloud builds submit
+          args: --tag ${{ env.IMAGE_TAG }}
+
+      # 3. Розгортання образу в Cloud Run
+      - name: Розгортання в Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: ${{ env.SERVICE_NAME }}
+          region: ${{ env.REGION }}
+          image: ${{ env.IMAGE_TAG }}
+          project_id: ${{ env.PROJECT_ID }}
+        
+          flags: --platform managed --allow-unauthenticated --port 8080
