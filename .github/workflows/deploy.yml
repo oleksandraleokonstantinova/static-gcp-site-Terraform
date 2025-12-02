@@ -2,34 +2,65 @@ name: Deploy to GCS
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:  # lets you click "Run workflow" in the Actions tab
+    branches:  
+    - main
+    # Дозволяє запускати вручну та передавати параметри
+  workflow_dispatch:
+    inputs:
+      clean_bucket:
+        description: 'Очистити GCS бакет перед завантаженням?'
+        required: false
+        type: boolean
+        default: false
 
+# Дозволи для OIDC-аутентифікації з GCP
 permissions:
-  contents: read
+  contents: read  
   id-token: write
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    # Використовуємо стабільну версію Ubuntu для надійності
+    runs-on: ubuntu-22.04 
+    
+    env:
+      GCS_BUCKET: ${{ secrets.GCS_BUCKET_NAME }} # Використовуємо змінну оточення
 
-      - uses: google-github-actions/auth@v2
+    steps:
+      - name: Вивантажити код репозиторію
+        uses: actions/checkout@v4
+
+      # Аутентифікація в Google Cloud через Workload Identity Federation (WIF)
+      - name: Аутентифікація в GCP
+        uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT_EMAIL }}
 
-      # (optional) clean to ensure metadata like cache-control gets rewritten
-      - name: Clean bucket
+      # Перевірка: Переконаємося, що директорія 'site' існує
+      - name: Перевірка наявності директорії site
         run: |
-          gcloud storage rm -r gs://${{ secrets.GCS_BUCKET_NAME }}/** || true
+          if [ ! -d "site" ]; then
+            echo "::error::Директорія 'site' не знайдена! Розгортання скасовано."
+            exit 1
+          fi
 
-      - name: Upload site to GCS with cache-control
+      # Опціональна очистка: Запускається лише при ручному виклику з clean_bucket=true
+      - name: Очищення GCS бакету (умовне)
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.clean_bucket == 'true' }}
+        run: |
+          echo "Очищення бакету gs://${{ env.GCS_BUCKET }}..."
+          # || true для запобігання збою, якщо бакет порожній
+          gcloud storage rm -r gs://${{ env.GCS_BUCKET }}/** || true
+
+      # Розгортання: Завантаження файлів у GCS
+      - name: Завантаження сайту з Cache-Control
         uses: google-github-actions/upload-cloud-storage@v3
         with:
           path: site
-          destination: ${{ secrets.GCS_BUCKET_NAME }}
+          destination: ${{ env.GCS_BUCKET }}
           gzip: true
+          # Встановлення заголовків кешування
           cacheControl: 'public, max-age=300'
+          # 'parent: false' гарантує, що вміст 'site' потрапить у корінь бакету
           parent: false
