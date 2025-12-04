@@ -17,3 +17,12 @@ resource "google_cloud_run_v2_service" "static_site" {
     percent = 100
   }
 }
+#о IAM для публічного доступу
+resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
+  project  = var.project_id
+  location = var.region
+  name     = google_cloud_run_v2_service.static_site.name
+
+  role   = "roles/run.invoker"
+  member = "allUsers"
+}
