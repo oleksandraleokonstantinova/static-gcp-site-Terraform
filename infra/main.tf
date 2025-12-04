@@ -1,5 +1,5 @@
 resource "google_cloud_run_v2_service" "static_site" {
-  name     = var.service_name
+  name     = "static-site"
   location = var.region
 
   template {
