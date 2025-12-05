@@ -1,4 +1,5 @@
 # My GCP Static Site with Terraform
+e-mail: oleksandraleokonstantinova@gmail.com
 Фінальний проект EPAM Cloud & DevOps Fundamentals  
         У даному пректі мною було налаштовано повний цикл автоматизованого деплойменту сервісу на Google Cloud, використовуючи Terraform і GitHub Actions.
 1. Підготовка репозиторію та очищення структури
